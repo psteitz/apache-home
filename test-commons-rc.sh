@@ -101,34 +101,50 @@ if [ -z "$JDKS" ]; then
     JDKS="default"
 fi
 
+# Initialize version tracking
+VERSION_LOG="../test-versions.log"
+> "$VERSION_LOG"
+
+# Initialize build results tracking
+SUCCESSFUL_BUILDS=()
+FAILED_BUILDS=()
+
 # Build with each available JDK
 for JDK in $JDKS; do
     echo ""
     echo "=========================================="
+    
+    # Determine JDK identifier for log filename
     if [ "$JDK" != "default" ]; then
         echo "Setting JDK to: $JDK"
         sudo update-alternatives --set java "$JDK"
         export JAVA_HOME=$(dirname $(dirname "$JDK"))
-        java -version
-        mvn --version
+        JDK_NAME=$(java -version 2>&1 | head -1 | sed 's/.*"\([^"]*\)".*/\1/' | tr ' ' '-')
     else
         echo "Building with default JDK"
-        java -version
-        echo "Maven info:"
-        mvn --version
+        JDK_NAME="default"
     fi
     echo "=========================================="
     
+    # Capture version info
+    echo "" >> "$VERSION_LOG"
+    echo "Testing with:" >> "$VERSION_LOG"
+    java -version 2>&1 | tee -a "$VERSION_LOG"
+    mvn --version 2>&1 | tee -a "$VERSION_LOG"
+    
+    BUILD_LOG="../mvn-build-${JDK_NAME}.log"
     echo "Running: mvn clean install site"
-    if mvn clean install site | tee ../mvn-build.log | grep -q "BUILD SUCCESS"; then
+    if mvn clean install site | tee "$BUILD_LOG" | grep -q "BUILD SUCCESS"; then
         echo "Build successful with JDK: $JDK"
         echo ""
         echo "Maven info:"
         mvn --version
+        SUCCESSFUL_BUILDS+=("$JDK_NAME")
     else
         echo "Build failed with JDK: $JDK"
         echo "Maven output:"
-        tail -20 ../mvn-build.log
+        tail -20 "$BUILD_LOG"
+        FAILED_BUILDS+=("$JDK_NAME")
     fi
 done
 
@@ -136,3 +152,19 @@ echo ""
 echo "=========================================="
 echo "Testing completed"
 echo "=========================================="
+echo ""
+echo "Summary of test environments:"
+echo "=========================================="
+cat "$VERSION_LOG"
+echo "=========================================="
+echo ""
+
+# Report build results
+if [ ${#FAILED_BUILDS[@]} -eq 0 ]; then
+    echo "All JDK builds were successful."
+else
+    echo "Build failures detected:"
+    for failed_jdk in "${FAILED_BUILDS[@]}"; do
+        echo "  - $failed_jdk"
+    done
+fi
